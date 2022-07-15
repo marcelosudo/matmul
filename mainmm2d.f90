@@ -1,11 +1,11 @@
-!pgf90 -acc -cuda -cudalib -Minfo=accel mainno8.f90 -o mainno8
+!pgf90 -acc -cuda -cudalib -Minfo=accel mainmm2d.f90 -o mainmm2d
 real(8) function leastsquares (x, y, mi, mj, mx, my)
 !Acuracia - quadrados minimos
 	real(8), dimension(mi,mj) :: x
-	real(8), dimension(mi,mj) :: y
+	real(2), dimension(mi,mj) :: y
 	integer mi, mj
 	real(8), intent(out) :: mx
-	real(8), intent(out) :: my
+	real(2), intent(out) :: my
 	real(8), allocatable, dimension(:,:) :: w, z
 	real(8) :: soma, diff
 	integer :: i, j
@@ -18,8 +18,8 @@ real(8) function leastsquares (x, y, mi, mj, mx, my)
 	do j = 1, mj
 		do i = 1, mi
 		    soma = soma + abs(z(i, j))
-			if (abs(w(i,j)) > diff) then
-				diff = abs(w(i,j))
+			if (w(i,j) > diff) then
+				diff = w(i,j)
 				mx = x(i,j)
 				my = y(i,j)
 			end if
@@ -33,14 +33,16 @@ program main
     use cutensorex
 	IMPLICIT NONE
 	real(8), external :: leastsquares
-    integer, parameter :: ni=1024, nj=1024, nk=1024
+    integer, parameter :: ni=5120, nj=5120, nk=5120
 	integer :: nt, i, j, k, n = 1, ntimes=1
 	integer, allocatable, dimension(:) :: state
-    real(8), allocatable, dimension(:,:) :: a, b, a1, b1, d, e
-    !real(8) :: tmp
-    real :: t1, t2, flops
-	real(8) :: mx, my
-    allocate(a(ni,nk),b(nk,nj),a1(ni,nk),b1(nk,nj),d(ni,nj),e(ni,nj))
+    real(2), allocatable, dimension(:,:) :: a, b, d
+	real(8), allocatable, dimension(:,:) :: a1, b1, e
+	real(2) :: my
+	real :: t1, t2, flops
+	real(8) :: mx
+    allocate(a(ni,nk),b(nk,nj),d(ni,nj))
+	allocate(a1(ni,nk),b1(nk,nj),e(ni,nj))
 	allocate(state(ni))
 	state = 20220315
 	call random_seed(put = state)
@@ -62,46 +64,35 @@ program main
     d = 0.
 	e = 0.0d0
  
-      print *,"mainno8.f90 ", ni, " x ", nj, " ntimes = ", ntimes
+      print *,"mainmm2d.f90 ", ni, " x ", nj, " ntimes = ", ntimes
       call cpu_time(t1)
-	!$acc enter data copyin(a,b) create(d)  
-	do nt = 1, ntimes
-	!$acc parallel loop collapse(2)	
-	do j = 1, nj
-		do i = 1, ni
-			!tmp = 0.0d0
-			!do k = 1, nk
-			!	tmp = tmp+a(i,k)*b(k,j)
-			!end do
-			!d(i,j) = d(i,j) + tmp
-            do k = 1, nk
-               d(i,j) = d(i,j) + a(i,k) * b(k,j)
-            end do
-        end do
-    end do
-        !$acc end parallel
-	end do
-	!$acc exit data copyout(d)
+	  !$acc data copyin(a,b) copyout(d)
+	  !$acc host_data use_device(a, b, d)
+      do nt = 1, ntimes
+        d = d + matmul(a,b)
+      end do
+	  !$acc end host_data
+	  !$acc end data
       call cpu_time(t2)
 	  print  "(8(f12.5))", ((d(i,j) , j= 1, 4 ), i= 1, 4)
 	  print *
-	  
+	
 	! CPU para validacao (double)
-	 print *,"CPU"
-	 do nt = 1, ntimes
-	 do j = 1, nj
-		 do i = 1, ni
-			 do k = 1, nk
-				 e(i,j)=e(i,j)+a1(i,k)*b1(k,j)
-			 end do
-		 end do
-	 end do
-	 end do
-	 print  "(8(f12.5))", ((e(i,j) , j= 1, 4 ), i= 1, 4)
-	 print *
-	 print *, "e - d (real(8)) = ", leastsquares(e, d, ni, nj, mx, my)
-	 print *, "e (max) = ", mx
-	 print *, "d (max) = ", my
+	print *,"CPU"
+	do nt = 1, ntimes
+	do j = 1, nj
+		do i = 1, ni
+			do k = 1, nk
+				e(i,j)=e(i,j)+a1(i,k)*b1(k,j)
+			end do
+		end do
+	end do
+	end do
+	print  "(8(f12.5))", ((e(i,j) , j= 1, 4 ), i= 1, 4)
+	print *
+	print *, "e - d (real(8-2)) = ", leastsquares(e, d, ni, nj, mx, my)
+	print *, "e (max) = ", mx
+	print *, "d (max) = ", my
 	
       flops = 2.0*ni*nj*nk
       flops = flops*ntimes

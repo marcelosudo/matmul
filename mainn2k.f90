@@ -1,4 +1,4 @@
-!pgf90 -acc -cuda -cudalib -Minfo=accel mainmm2.f90 -o mainmm2
+!pgf90 -acc -cuda -cudalib -Minfo=accel mainn2k.f90 -o mainn2k
 real function leastsquares (x, y, mi, mj, mx, my)
 !Acuracia - quadrados minimos
 	real, dimension(mi,mj) :: x
@@ -18,8 +18,8 @@ real function leastsquares (x, y, mi, mj, mx, my)
 	do j = 1, mj
 		do i = 1, mi
 		    soma = soma + abs(z(i, j))
-			if (w(i,j) > diff) then
-				diff = w(i,j)
+			if (abs(w(i,j)) > diff) then
+				diff = abs(w(i,j))
 				mx = x(i,j)
 				my = y(i,j)
 			end if
@@ -28,16 +28,17 @@ real function leastsquares (x, y, mi, mj, mx, my)
 	leastsquares = soma / (mi * mj)
 	return 
 end function
-
+	 
 program main
     use cutensorex
 	IMPLICIT NONE
 	real, external :: leastsquares
     integer, parameter :: ni=5120, nj=5120, nk=5120
-	integer :: nt, i, j, k, n = 1, ntimes=1
+	integer :: nt, i, j, k, n = 1, ntimes=10
 	integer, allocatable, dimension(:) :: state
     real(2), allocatable, dimension(:,:) :: a, b, d
 	real, allocatable, dimension(:,:) :: a1, b1, e
+	real(2) :: soma, c, y, t !Kahan
 	real(2) :: my
 	real :: t1, t2, flops, mx
     allocate(a(ni,nk),b(nk,nj),d(ni,nj))
@@ -62,39 +63,50 @@ program main
 	print *, "b (max) = ", my
     d = 0.
 	e = 0.0d0
- 
-      print *,"mainmm2.f90 ", ni, " x ", nj, " ntimes = ", ntimes
+
+      print *,"mainn2k.f90 ", ni, " x ", nj, " ntimes = ", ntimes
       call cpu_time(t1)
-	  !$acc data copyin(a,b) copyout(d)
-	  !$acc host_data use_device(a, b, d)
-      do nt = 1, ntimes
-        d = d + matmul(a,b)
+	do nt = 1, ntimes
+	!$acc kernels
+      do j = 1, nj
+         do i = 1, ni
+			!Kahan Summation Algorithm
+			soma = 0.
+			c = 0.
+            do k = 1, nk
+			   y = a(i,k) * b(k,j) - c
+			   t = soma + y
+			   c = (t - soma) - y
+			   soma = t
+            end do
+			d(i,j) = soma
+         end do
       end do
-	  !$acc end host_data
-	  !$acc end data
+	!$acc end kernels
+	end do
       call cpu_time(t2)
 	  print  "(8(f12.5))", ((d(i,j) , j= 1, 4 ), i= 1, 4)
 	  print *
-	
+	  
 	! CPU para validacao (double)
-	print *,"CPU"
-	do nt = 1, ntimes
-	do j = 1, nj
-		do i = 1, ni
-			do k = 1, nk
-				e(i,j)=e(i,j)+a1(i,k)*b1(k,j)
-			end do
-		end do
-	end do
-	end do
-	print  "(8(f12.5))", ((e(i,j) , j= 1, 4 ), i= 1, 4)
-	print *
-	print *, "e - d (real(2)) = ", leastsquares(e, d, ni, nj, mx, my)
-	print *, "e (max) = ", mx
-	print *, "d (max) = ", my
+	! print *,"CPU"
+	! do nt = 1, ntimes
+	! do j = 1, nj
+		! do i = 1, ni
+			! do k = 1, nk
+				! e(i,j)=e(i,j)+a1(i,k)*b1(k,j)
+			! end do
+		! end do
+	! end do
+	! end do
+	! print  "(8(f12.5))", ((e(i,j) , j= 1, 4 ), i= 1, 4)
+	! print *
+	! print *, "e - d (real(2)) = ", leastsquares(e, d, ni, nj, mx, my)
+	! print *, "e (max) = ", mx
+	! print *, "d (max) = ", my
 	
       flops = 2.0*ni*nj*nk
       flops = flops*ntimes
       print *,"times",t2,t1,t2-t1
       print *,"GFlops",flops/(t2-t1)/1.e9
-      end program
+end program
